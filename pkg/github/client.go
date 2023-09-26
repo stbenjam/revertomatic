@@ -194,7 +194,8 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string) erro
 	// Clone the upstream repository
 	logrus.Infof("cloning upstream repository...")
 	upstreamURL := fmt.Sprintf("https://github.com/%s/%s.git", prInfo.Owner, prInfo.Repository)
-	err = exec.Command("git", "clone", upstreamURL, tempDir).Run()
+	// shallow clone for slightly faster reverts
+	err = exec.Command("git", "clone", "--depth", "1", "-b", prInfo.BaseBranch, upstreamURL, tempDir).Run()
 	if err != nil {
 		return err
 	}
