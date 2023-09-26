@@ -31,7 +31,9 @@ Per [OpenShift policy](https://github.com/openshift/enhancements/blob/master/enh
 
 To unrevert this, revert this PR, and layer an additional separate commit on top that addresses the problem. Before merging the unrevert, please run these jobs on the PR and check the result of these jobs to confirm the fix has corrected the problem:
 
+` + "```" + `
 {{.Jobs}}
+` + "```" + `
 
 CC: @{{.OriginalAuthor}}
 `
