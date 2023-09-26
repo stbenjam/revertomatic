@@ -31,7 +31,7 @@ func NewCommand() *cobra.Command {
 var unoveridableJobs = regexp.MustCompile(`.*(unit|lint|images|verify|tide|verify-deps)$`)
 
 var cmd = &cobra.Command{
-	Use:   "reveromatic",
+	Use:   "revertomatic",
 	Short: "CLI tool to revert a PR",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get the GITHUB_TOKEN environment variable
