@@ -182,34 +182,14 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string) erro
 		logrus.Infof("fork of %q already exists for user %q", prInfo.Repository, *user.Login)
 	}
 
-	// Create a temporary directory
-	tempDir, err := os.MkdirTemp("", "revertomatic_")
+	// Clone repository
+	tempDir, err := c.cloneRepository(prInfo, user)
 	if err != nil {
 		return err
 	}
 	defer func() {
 		_ = os.RemoveAll(tempDir) // clean up after using
 	}()
-
-	// Clone the upstream repository
-	logrus.Infof("cloning upstream repository...")
-	upstreamURL := fmt.Sprintf("https://github.com/%s/%s.git", prInfo.Owner, prInfo.Repository)
-	// shallow clone for slightly faster reverts
-	err = exec.Command("git", "clone", "-b", prInfo.BaseBranch, upstreamURL, tempDir).Run()
-	if err != nil {
-		return err
-	}
-
-	// Navigate to the cloned repository directory
-	os.Chdir(tempDir)
-
-	// Add a remote for the fork
-	logrus.Infof("adding personal fork remote")
-	forkURL := fmt.Sprintf("git@github.com:%s/%s.git", *user.Login, prInfo.Repository)
-	err = exec.Command("git", "remote", "add", "fork", forkURL).Run()
-	if err != nil {
-		return err
-	}
 
 	// Branch
 	revertBranch := fmt.Sprintf("revert-%d-%d", prInfo.Number, time.Now().UnixMilli())
@@ -271,4 +251,34 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string) erro
 	logrus.Infof("pr created %s", pr.GetHTMLURL())
 
 	return nil
+}
+
+func (c *Client) cloneRepository(prInfo *v1.PullRequest, user *github.User) (string, error) {
+	// Create a temporary directory
+	tempDir, err := os.MkdirTemp("", "revertomatic_")
+	if err != nil {
+		return "", err
+	}
+
+	// Clone the upstream repository
+	logrus.Infof("cloning upstream repository...")
+	upstreamURL := fmt.Sprintf("https://github.com/%s/%s.git", prInfo.Owner, prInfo.Repository)
+	// shallow clone for slightly faster reverts
+	err = exec.Command("git", "clone", "-b", prInfo.BaseBranch, upstreamURL, tempDir).Run()
+	if err != nil {
+		return "", err
+	}
+
+	// Navigate to the cloned repository directory
+	os.Chdir(tempDir)
+
+	// Add a remote for the fork
+	logrus.Infof("adding personal fork remote")
+	forkURL := fmt.Sprintf("git@github.com:%s/%s.git", *user.Login, prInfo.Repository)
+	err = exec.Command("git", "remote", "add", "fork", forkURL).Run()
+	if err != nil {
+		return "", err
+	}
+
+	return tempDir, nil
 }

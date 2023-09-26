@@ -10,15 +10,21 @@ import (
 )
 
 var opts struct {
-	prURI    string
-	override bool
-	jira     string
-	context  string
-	verify   string
+	prURI        string
+	override     bool
+	jira         string
+	context      string
+	verify       string
+	localRepo    string
+	forkRemote   string
+	forkUpstream string
 }
 
 func NewCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.prURI, "pr-url", "p", "", "Pull request URL")
+	cmd.Flags().StringVarP(&opts.localRepo, "local-repo", "l", "", "Local copy of the repo, already cloned")
+	cmd.Flags().StringVarP(&opts.forkRemote, "fork-remote", "r", "origin", "Name of the fork remote")
+	cmd.Flags().StringVarP(&opts.forkUpstream, "fork-upstream", "u", "upstream", "Name of the upstream remote")
 	cmd.Flags().StringVarP(&opts.jira, "jira", "j", "", "Jira card tracking the revert")
 	cmd.Flags().StringVarP(&opts.context, "context", "c", "", "Supply context explaining the revert")
 	cmd.Flags().StringVarP(&opts.verify, "verify", "v", "", "Supply details about how to verify a fix (i.e. jobs to run)")
