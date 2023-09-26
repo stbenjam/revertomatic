@@ -1,14 +1,18 @@
 package github
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
 	"net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"text/template"
+	"time"
 
 	"github.com/google/go-github/github"
 	"github.com/sirupsen/logrus"
@@ -17,6 +21,20 @@ import (
 
 	v1 "github.com/openshift-eng/revertomatic/pkg/api/v1"
 )
+
+const revertTemplate = `
+Reverts #{{.OriginalPR}} ; tracked by {{.JiraIssue}}
+
+Per [OpenShift policy](https://github.com/openshift/enhancements/blob/master/enhancements/release/improving-ci-signal.md#quick-revert), we are reverting this breaking change to get CI and/or nightly payloads flowing again.
+
+{{.Context}}
+
+To unrevert this, revert this PR, and layer an additional separate commit on top that addresses the problem. Before merging the unrevert, please run these jobs on the PR and check the result of these jobs to confirm the fix has corrected the problem:
+
+{{.Jobs}}
+
+CC: @{{.OriginalAuthor}}
+`
 
 var unoveridableJobs = regexp.MustCompile(`.*(unit|lint|images|verify|tide|verify-deps)$`)
 
@@ -45,7 +63,7 @@ func New(ctx context.Context) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) ExtractPRInfo(githubURL string) (pr *v1.PullRequest, err error) {
+func (c *Client) ExtractPRInfo(githubURL string) (*v1.PullRequest, error) {
 	u, err := url.Parse(githubURL)
 	if err != nil {
 		return nil, err
@@ -62,16 +80,42 @@ func (c *Client) ExtractPRInfo(githubURL string) (pr *v1.PullRequest, err error)
 		return nil, err
 	}
 
+	pr := &v1.PullRequest{
+		Owner:      segments[0],
+		Repository: segments[1],
+		Number:     fmtNum,
+	}
+
+	// Get the PR
+	prGH, _, err := c.client.PullRequests.Get(c.ctx, pr.Owner, pr.Repository, pr.Number)
+	if err != nil {
+		logrus.WithError(err).WithFields(map[string]interface{}{
+			"owner": pr.Owner,
+			"repo":  pr.Repository,
+			"prNum": pr.Number,
+		}).Warn("failed to get PR")
+		return nil, err
+	}
+	if prGH.MergeCommitSHA != nil {
+		pr.MergedSHA = *prGH.MergeCommitSHA
+	}
+	if prGH.Base != nil {
+		pr.BaseBranch = *prGH.Base.Ref
+	}
+	if prGH.Title != nil {
+		pr.Title = *prGH.Title
+	}
+	if prGH.User != nil {
+		pr.Author = *prGH.User.Login
+	}
+
 	logrus.WithFields(map[string]interface{}{
 		"owner":     segments[0],
 		"repo":      segments[1],
 		"pr_number": fmtNum,
 	}).Infof("found info for pr %s", githubURL)
-	return &v1.PullRequest{
-		Owner:      segments[0],
-		Repository: segments[1],
-		Number:     fmtNum,
-	}, nil
+
+	return pr, nil
 }
 
 func (c *Client) GetOverridableStatuses(prInfo *v1.PullRequest) ([]string, error) {
@@ -91,7 +135,6 @@ func (c *Client) GetOverridableStatuses(prInfo *v1.PullRequest) ([]string, error
 	}
 
 	sha := *pr.Head.SHA
-	logrus.Infof("Most recent SHA of the PR: %s\n", sha)
 
 	// Get statuses for the SHA
 	statuses, _, err := c.client.Repositories.ListStatuses(c.ctx, prInfo.Owner, prInfo.Repository, sha, nil)
@@ -113,4 +156,116 @@ func (c *Client) GetOverridableStatuses(prInfo *v1.PullRequest) ([]string, error
 	}
 
 	return uniqueStatuses.UnsortedList(), nil
+}
+
+func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string) error {
+	// Check if the user has a fork of the repository
+	user, _, err := c.client.Users.Get(c.ctx, "")
+	if err != nil {
+		return err
+	}
+
+	// Find a user's fork
+	// Note, this won't work if the repository was renamed.  Is there a better way to find
+	// the user's fork?
+	repo, _, err := c.client.Repositories.Get(c.ctx, *user.Login, prInfo.Repository)
+	if err != nil && repo == nil {
+		logrus.Infof("fork of %q not found for user %q, creating one...", prInfo.Repository, *user.Login)
+		// If not, create a fork
+		repo, _, err = c.client.Repositories.CreateFork(c.ctx, prInfo.Owner, prInfo.Repository, nil)
+		if err != nil {
+			return err
+		}
+	} else {
+		logrus.Infof("fork of %q already exists for user %q", prInfo.Repository, *user.Login)
+	}
+
+	// Create a temporary directory
+	tempDir, err := os.MkdirTemp("", "revertomatic_")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = os.RemoveAll(tempDir) // clean up after using
+	}()
+
+	// Clone the upstream repository
+	logrus.Infof("cloning upstream repository...")
+	upstreamURL := fmt.Sprintf("https://github.com/%s/%s.git", prInfo.Owner, prInfo.Repository)
+	err = exec.Command("git", "clone", upstreamURL, tempDir).Run()
+	if err != nil {
+		return err
+	}
+
+	// Navigate to the cloned repository directory
+	os.Chdir(tempDir)
+
+	// Add a remote for the fork
+	logrus.Infof("adding personal fork remote")
+	forkURL := fmt.Sprintf("git@github.com:%s/%s.git", *user.Login, prInfo.Repository)
+	err = exec.Command("git", "remote", "add", "fork", forkURL).Run()
+	if err != nil {
+		return err
+	}
+
+	// Branch
+	revertBranch := fmt.Sprintf("revert-%d-%d", prInfo.Number, time.Now().UnixMilli())
+	logrus.Infof("creating revert branch %s", revertBranch)
+	err = exec.Command("git", "checkout", "-b", revertBranch).Run()
+	if err != nil {
+		return err
+	}
+	err = exec.Command("git", "revert", "-m1", "--no-edit", prInfo.MergedSHA).Run()
+	if err != nil {
+		return err
+	}
+	err = exec.Command("git", "push", "fork", revertBranch).Run()
+	if err != nil {
+		return err
+	}
+
+	// Revert template
+	tmpl, err := template.New("revertTemplate").Parse(revertTemplate)
+	if err != nil {
+		return err
+	}
+
+	// Revert template
+	data := struct {
+		OriginalPR     int
+		OriginalAuthor string
+		JiraIssue      string
+		Context        string
+		Jobs           string
+	}{
+		OriginalAuthor: prInfo.Author,
+		JiraIssue:      jira,
+		Context:        context,
+		Jobs:           jobs,
+		OriginalPR:     prInfo.Number,
+	}
+
+	var renderedMsg bytes.Buffer
+	if err := tmpl.Execute(&renderedMsg, data); err != nil {
+		return err
+	}
+
+	// Pull request details
+	newPR := &github.NewPullRequest{
+		Title:               github.String(fmt.Sprintf("Revert #%d %q", prInfo.Number, prInfo.Title)),
+		Head:                github.String(fmt.Sprintf("%s:%s", *user.Login, revertBranch)),
+		Base:                github.String(prInfo.BaseBranch), // branch you want to merge into
+		Body:                github.String(renderedMsg.String()),
+		MaintainerCanModify: github.Bool(true),
+	}
+
+	pr, _, err := c.client.PullRequests.Create(c.ctx, prInfo.Owner, prInfo.Repository, newPR)
+	if err != nil {
+		logrus.WithError(err).Warn("PullRequests.Create returned error")
+		return err
+	}
+
+	logrus.Infof("pr created %s", pr.GetHTMLURL())
+
+	return nil
 }
