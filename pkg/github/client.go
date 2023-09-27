@@ -160,41 +160,54 @@ func (c *Client) GetOverridableStatuses(prInfo *v1.PullRequest) ([]string, error
 	return uniqueStatuses.UnsortedList(), nil
 }
 
-func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string) error {
-	// Check if the user has a fork of the repository
-	user, _, err := c.client.Users.Get(c.ctx, "")
-	if err != nil {
-		return err
-	}
-
-	// Find a user's fork
-	// Note, this won't work if the repository was renamed.  Is there a better way to find
-	// the user's fork?
-	repo, _, err := c.client.Repositories.Get(c.ctx, *user.Login, prInfo.Repository)
-	if err != nil && repo == nil {
-		logrus.Infof("fork of %q not found for user %q, creating one...", prInfo.Repository, *user.Login)
-		// If not, create a fork
-		repo, _, err = c.client.Repositories.CreateFork(c.ctx, prInfo.Owner, prInfo.Repository, nil)
+func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repoOpts *v1.RepositoryOptions) error {
+	// If we don't have a local copy we'll clone it and make sure the user has a fork
+	if repoOpts == nil {
+		// Check if the user has a fork of the repository
+		user, _, err := c.client.Users.Get(c.ctx, "")
 		if err != nil {
 			return err
 		}
-	} else {
-		logrus.Infof("fork of %q already exists for user %q", prInfo.Repository, *user.Login)
+
+		// Find a user's fork
+		// Note, this won't work if the repository was renamed.  Is there a better way to find
+		// the user's fork?
+		repo, _, err := c.client.Repositories.Get(c.ctx, *user.Login, prInfo.Repository)
+		if err != nil && repo == nil {
+			logrus.Infof("fork of %q not found for user %q, creating one...", prInfo.Repository, *user.Login)
+			// If not, create a fork
+			repo, _, err = c.client.Repositories.CreateFork(c.ctx, prInfo.Owner, prInfo.Repository, nil)
+			if err != nil {
+				return err
+			}
+		} else {
+			logrus.Infof("fork of %q already exists for user %q", prInfo.Repository, *user.Login)
+		}
+
+		// Clone repository
+		tempDir, err := c.cloneRepository(prInfo, user)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = os.RemoveAll(tempDir) // clean up after using
+		}()
+
+		repoOpts = &v1.RepositoryOptions{
+			LocalPath:      tempDir,
+			UpstreamRemote: "upstream",
+			ForkRemote:     "fork",
+		}
 	}
 
-	// Clone repository
-	tempDir, err := c.cloneRepository(prInfo, user)
-	if err != nil {
+	if err := os.Chdir(repoOpts.LocalPath); err != nil {
 		return err
 	}
-	defer func() {
-		_ = os.RemoveAll(tempDir) // clean up after using
-	}()
 
 	// Branch
 	revertBranch := fmt.Sprintf("revert-%d-%d", prInfo.Number, time.Now().UnixMilli())
 	logrus.Infof("creating revert branch %s", revertBranch)
-	err = exec.Command("git", "checkout", "-b", revertBranch).Run()
+	err := exec.Command("git", "checkout", "-b", revertBranch).Run()
 	if err != nil {
 		return err
 	}

@@ -4,27 +4,29 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 
+	v1 "github.com/openshift-eng/revertomatic/pkg/api/v1"
 	"github.com/openshift-eng/revertomatic/pkg/github"
 )
 
 var opts struct {
-	prURI        string
-	override     bool
-	jira         string
-	context      string
-	verify       string
-	localRepo    string
-	forkRemote   string
-	forkUpstream string
+	prURI          string
+	override       bool
+	jira           string
+	context        string
+	verify         string
+	localRepo      string
+	forkRemote     string
+	upstreamRemote string
 }
 
 func NewCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.prURI, "pr-url", "p", "", "Pull request URL")
 	cmd.Flags().StringVarP(&opts.localRepo, "local-repo", "l", "", "Local copy of the repo, already cloned")
 	cmd.Flags().StringVarP(&opts.forkRemote, "fork-remote", "r", "origin", "Name of the fork remote")
-	cmd.Flags().StringVarP(&opts.forkUpstream, "fork-upstream", "u", "upstream", "Name of the upstream remote")
+	cmd.Flags().StringVarP(&opts.upstreamRemote, "upstream-remote", "u", "upstream", "Name of the upstream remote")
 	cmd.Flags().StringVarP(&opts.jira, "jira", "j", "", "Jira card tracking the revert")
 	cmd.Flags().StringVarP(&opts.context, "context", "c", "", "Supply context explaining the revert")
 	cmd.Flags().StringVarP(&opts.verify, "verify", "v", "", "Supply details about how to verify a fix (i.e. jobs to run)")
@@ -64,7 +66,17 @@ var cmd = &cobra.Command{
 			return err
 		}
 
-		if err := client.Revert(pr, opts.jira, opts.context, opts.verify); err != nil {
+		var repoOpts *v1.RepositoryOptions
+		if opts.localRepo != "" && opts.forkRemote != "" && opts.upstreamRemote != "" {
+			logrus.Infof("have local copy repo, will use that...")
+			repoOpts = &v1.RepositoryOptions{
+				LocalPath:      opts.localRepo,
+				UpstreamRemote: opts.upstreamRemote,
+				ForkRemote:     opts.forkRemote,
+			}
+		}
+
+		if err := client.Revert(pr, opts.jira, opts.context, opts.verify, repoOpts); err != nil {
 			return err
 		}
 

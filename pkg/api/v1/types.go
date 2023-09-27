@@ -9,3 +9,9 @@ type PullRequest struct {
 	BaseBranch string
 	Author     string
 }
+
+type RepositoryOptions struct {
+	LocalPath      string
+	UpstreamRemote string
+	ForkRemote     string
+}
