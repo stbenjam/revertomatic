@@ -3,126 +3,93 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log"
-	"net/url"
-	"os"
-	"regexp"
-	"strconv"
-	"strings"
 
-	"github.com/google/go-github/github"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
-	"golang.org/x/oauth2"
-	"k8s.io/apimachinery/pkg/util/sets"
+
+	v1 "github.com/openshift-eng/revertomatic/pkg/api/v1"
+	"github.com/openshift-eng/revertomatic/pkg/github"
 )
 
 var opts struct {
-	prURI    string
-	override bool
+	prURI          string
+	override       bool
+	jira           string
+	context        string
+	verify         string
+	localRepo      string
+	forkRemote     string
+	upstreamRemote string
 }
 
 func NewCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.prURI, "pr-url", "p", "", "Pull request URL")
-	cmd.Flags().BoolVarP(&opts.override, "override", "o", false, "Override all required CI (force PR merge)")
+	cmd.Flags().StringVarP(&opts.localRepo, "local-repo", "l", "", "Local copy of the repo, already cloned")
+	cmd.Flags().StringVarP(&opts.forkRemote, "fork-remote", "r", "origin", "Name of the fork remote")
+	cmd.Flags().StringVarP(&opts.upstreamRemote, "upstream-remote", "u", "upstream", "Name of the upstream remote")
+	cmd.Flags().StringVarP(&opts.jira, "jira", "j", "", "Jira card tracking the revert")
+	cmd.Flags().StringVarP(&opts.context, "context", "c", "", "Supply context explaining the revert")
+	cmd.Flags().StringVarP(&opts.verify, "verify", "v", "", "Supply details about how to verify a fix (i.e. jobs to run)")
 	return cmd
 }
 
-var unoveridableJobs = regexp.MustCompile(`.*(unit|lint|images|verify|tide|verify-deps)$`)
-
 var cmd = &cobra.Command{
-	Use:   "reveromatic",
+	Use:   "revertomatic",
 	Short: "CLI tool to revert a PR",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Get the GITHUB_TOKEN environment variable
-		// todo: read from config file
-		githubToken := os.Getenv("GITHUB_TOKEN")
-		if githubToken == "" {
-			cmd.Usage() //nolint
-			return fmt.Errorf("github token required; please set the GITHUB_TOKEN environment variable")
-		}
-
 		if opts.prURI == "" {
 			cmd.Usage() //nolint
 			return fmt.Errorf("no pr url specified")
 		}
-		owner, repo, prNum, err := extractGitHubInfo(opts.prURI)
+
+		if opts.jira == "" {
+			cmd.Usage()
+			return fmt.Errorf("required jira field is missing")
+		}
+		if opts.context == "" {
+			cmd.Usage()
+			return fmt.Errorf("required context field is missing")
+		}
+		if opts.verify == "" {
+			cmd.Usage()
+			return fmt.Errorf("required verify field is missing")
+		}
+
+		client, err := github.New(context.Background())
+		if err != nil {
+			cmd.Usage()
+			return err
+		}
+
+		pr, err := client.ExtractPRInfo(opts.prURI)
 		if err != nil {
 			return err
 		}
 
-		ctx := context.Background()
+		var repoOpts *v1.RepositoryOptions
+		if opts.localRepo != "" && opts.forkRemote != "" && opts.upstreamRemote != "" {
+			logrus.Infof("have local copy repo, will use that...")
+			repoOpts = &v1.RepositoryOptions{
+				LocalPath:      opts.localRepo,
+				UpstreamRemote: opts.upstreamRemote,
+				ForkRemote:     opts.forkRemote,
+			}
+		}
 
-		// If using a personal access token
-		ts := oauth2.StaticTokenSource(
-			&oauth2.Token{AccessToken: githubToken},
-		)
-		tc := oauth2.NewClient(ctx, ts)
+		if err := client.Revert(pr, opts.jira, opts.context, opts.verify, repoOpts); err != nil {
+			return err
+		}
 
-		client := github.NewClient(tc)
-
-		// Get the PR
-		pr, _, err := client.PullRequests.Get(ctx, owner, repo, prNum)
+		fmt.Println("******** After verifying the PR is correct, you can use the comment below to override CI:")
+		statuses, err := client.GetOverridableStatuses(pr)
 		if err != nil {
-			log.Fatalf("Failed to get PR: %v", err)
+			return err
 		}
 
-		if pr.Head == nil || pr.Head.SHA == nil {
-			log.Fatalf("Failed to retrieve SHA of the PR")
-		}
-
-		sha := *pr.Head.SHA
-		logrus.Infof("Most recent SHA of the PR: %s\n", sha)
-
-		if opts.override {
-			// Get statuses for the SHA
-			statuses, _, err := client.Repositories.ListStatuses(ctx, owner, repo, sha, nil)
-			if err != nil {
-				log.Fatalf("Failed to get statuses for SHA %s: %v", sha, err)
-			}
-
-			uniqueContexts := sets.New[string]()
-			for _, status := range statuses {
-				if status != nil && status.Context != nil && !unoveridableJobs.MatchString(*status.Context) {
-					uniqueContexts.Insert(*status.Context)
-				}
-			}
-
-			forceMergeComment := ""
-			for _, c := range uniqueContexts.UnsortedList() {
-				forceMergeComment += fmt.Sprintf("/override %s\n", c)
-			}
-
-			// todo automatically open revert PR and comment overrides
-			logrus.Infof("comment this to override ci contexts and force your PR")
-			fmt.Println(forceMergeComment)
+		for _, status := range statuses {
+			fmt.Printf("/override %s\n", status)
 		}
 
 		return nil
 	},
-}
-
-func extractGitHubInfo(githubURL string) (owner, repo string, prNum int, err error) {
-	u, err := url.Parse(githubURL)
-	if err != nil {
-		return "", "", 0, err
-	}
-
-	// Assuming the URL is correct, we split the path into segments
-	segments := strings.Split(strings.Trim(u.Path, "/"), "/")
-	if len(segments) < 4 || segments[2] != "pull" {
-		return "", "", 0, fmt.Errorf("invalid GitHub PR URL format")
-	}
-
-	fmtNum, err := strconv.Atoi(segments[3])
-	if err != nil {
-		return "", "", 0, err
-	}
-
-	logrus.WithFields(map[string]interface{}{
-		"owner":     segments[0],
-		"repo":      segments[1],
-		"pr_number": fmtNum,
-	}).Infof("found info for pr %s", githubURL)
-	return segments[0], segments[1], fmtNum, nil
 }

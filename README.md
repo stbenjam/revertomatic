@@ -1,37 +1,41 @@
 # Revertomatic
 
-Tool for reverting pull requests for TRT.  At the moment it doesn't do much
-other than spit out the override commands needed, which is a bit of a pain
-otherwise since you can't easily copy and paste from the GitHub status.
-Eventually it'll try to do as much of the TRT revert workflow as possible,
-including Jira stuff.
+Tool for reverting pull requests for TRT.  
 
 ## Usage
 
-Get a GitHub token and then do this:
-    
+Ensure you have a GitHub token set:
+
 ```
 $ export GITHUB_TOKEN="xyzabcdefgh"
-$ make
-$ ./revertomatic -p https://github.com/openshift/origin/pull/28242 -o
+```
 
-INFO[0000] found info for pr https://github.com/openshift/origin/pull/28242  owner=openshift pr_number=28242 repo=origin
-INFO[0000] Most recent SHA of the PR: 5f853f06192eaff21edc6ade16a77d1e85ba149e 
-INFO[0000] comment this to override ci contexts and force your PR 
-/override ci/prow/e2e-agnostic-ovn-cmd
-/override ci/prow/e2e-metal-ipi-sdn
-/override ci/prow/e2e-metal-ipi-ovn-ipv6
-/override ci/prow/e2e-gcp-ovn
-/override ci/prow/e2e-openstack-ovn
-/override ci/prow/e2e-gcp-csi
-/override ci/prow/e2e-aws-ovn-single-node-upgrade
-/override ci/prow/e2e-aws-ovn-serial
-/override ci/prow/e2e-aws-ovn-cgroupsv2
-/override ci/prow/e2e-aws-csi
-/override ci/prow/e2e-gcp-ovn-rt-upgrade
-/override ci/prow/e2e-gcp-ovn-upgrade
-/override ci/prow/e2e-aws-ovn-upgrade
-/override ci/prow/e2e-aws-ovn-single-node
-/override ci/prow/e2e-aws-ovn-single-node-serial
-/override ci/prow/e2e-aws-ovn-fips
+### No local clone
+
+If you don't have a local copy of the repository already, you can use the
+following command, Revertomatic will create a temporary clone and perform the
+revert. For large repositories (origin, kubernetes) this can take a long time
+and it's better if you have a local clone already (see next section).
+
+```
+./revertomatic \
+    -p https://github.com/openshift/kubernetes/pull/1703 \
+    -j TRT-9999 \
+    -v "Verification steps TBD" \
+    -c "This PR broke all jobs on https://amd64.ocp.releases.ci.openshift.org/releasestream/4.15.0-0.nightly/release/4.15.0-0.nightly-2023-10-03-025546"
+```
+
+### Local clone of Repository
+
+To use a local clone, set -l, -u, and -r settings like this:
+
+```
+./revertomatic \
+    -p https://github.com/openshift/kubernetes/pull/1703 \
+    -j TRT-9999 \
+    -v "Verification steps TBD" \
+    -c "This PR broke all jobs on https://amd64.ocp.releases.ci.openshift.org/releasestream/4.15.0-0.nightly/release/4.15.0-0.nightly-2023-10-03-025546" \
+    -l $HOME/go/src/github.com/kubernetes/kubernetes \
+    -u origin \
+    -r stbenjam
 ```
