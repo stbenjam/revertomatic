@@ -4,7 +4,9 @@ Tool for reverting pull requests for TRT.
 
 ## Usage
 
-Ensure you have a GitHub token set:
+Ensure you have a GitHub token set.  Get a [personal access
+token](https://github.com/settings/tokens) with read:org, repo, and user
+privileges:
 
 ```
 $ export GITHUB_TOKEN="xyzabcdefgh"
