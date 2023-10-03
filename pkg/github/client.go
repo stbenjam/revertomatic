@@ -38,6 +38,8 @@ To unrevert this, revert this PR, and layer an additional separate commit on top
 CC: @{{.OriginalAuthor}}
 `
 
+// unoveridableJobs are the jobs we typically don't want to override: typically fast running and the bare minimum to
+// make sure things build.
 var unoveridableJobs = regexp.MustCompile(`.*(unit|lint|images|verify|tide|verify-deps)$`)
 
 type Client struct {
@@ -161,14 +163,14 @@ func (c *Client) GetOverridableStatuses(prInfo *v1.PullRequest) ([]string, error
 }
 
 func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repoOpts *v1.RepositoryOptions) error {
+	// Fetch user details
+	user, _, err := c.client.Users.Get(c.ctx, "")
+	if err != nil {
+		return err
+	}
+
 	// If we don't have a local copy we'll clone it and make sure the user has a fork
 	if repoOpts == nil {
-		// Check if the user has a fork of the repository
-		user, _, err := c.client.Users.Get(c.ctx, "")
-		if err != nil {
-			return err
-		}
-
 		// Find a user's fork
 		// Note, this won't work if the repository was renamed.  Is there a better way to find
 		// the user's fork?
@@ -205,9 +207,13 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repo
 	}
 
 	// Branch
+	err = exec.Command("git", "fetch", repoOpts.UpstreamRemote).Run()
+	if err != nil {
+		return err
+	}
 	revertBranch := fmt.Sprintf("revert-%d-%d", prInfo.Number, time.Now().UnixMilli())
 	logrus.Infof("creating revert branch %s", revertBranch)
-	err := exec.Command("git", "checkout", "-b", revertBranch).Run()
+	err = exec.Command("git", "checkout", "-b", revertBranch, fmt.Sprintf("%s/%s", repoOpts.UpstreamRemote, prInfo.BaseBranch)).Run()
 	if err != nil {
 		return err
 	}
@@ -215,7 +221,7 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repo
 	if err != nil {
 		return err
 	}
-	err = exec.Command("git", "push", "fork", revertBranch).Run()
+	err = exec.Command("git", "push", repoOpts.ForkRemote, revertBranch).Run()
 	if err != nil {
 		return err
 	}
