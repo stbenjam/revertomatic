@@ -43,21 +43,21 @@ var cmd = &cobra.Command{
 		}
 
 		if opts.jira == "" {
-			cmd.Usage()
+			cmd.Usage() //nolint
 			return fmt.Errorf("required jira field is missing")
 		}
 		if opts.context == "" {
-			cmd.Usage()
+			cmd.Usage() //nolint
 			return fmt.Errorf("required context field is missing")
 		}
 		if opts.verify == "" {
-			cmd.Usage()
+			cmd.Usage() //nolint
 			return fmt.Errorf("required verify field is missing")
 		}
 
 		client, err := github.New(context.Background())
 		if err != nil {
-			cmd.Usage()
+			cmd.Usage() //nolint
 			return err
 		}
 

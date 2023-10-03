@@ -187,7 +187,8 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repo
 		}
 
 		// Clone repository
-		tempDir, err := c.cloneRepository(prInfo, user)
+		forkURL := fmt.Sprintf("git@github.com:%s/%s.git", *user.Login, *repo.Name)
+		tempDir, err := c.cloneRepository(prInfo, forkURL)
 		if err != nil {
 			return err
 		}
@@ -272,7 +273,7 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repo
 	return nil
 }
 
-func (c *Client) cloneRepository(prInfo *v1.PullRequest, user *github.User) (string, error) {
+func (c *Client) cloneRepository(prInfo *v1.PullRequest, forkURL string) (string, error) {
 	// Create a temporary directory
 	tempDir, err := os.MkdirTemp("", "revertomatic_")
 	if err != nil {
@@ -289,11 +290,12 @@ func (c *Client) cloneRepository(prInfo *v1.PullRequest, user *github.User) (str
 	}
 
 	// Navigate to the cloned repository directory
-	os.Chdir(tempDir)
+	if err := os.Chdir(tempDir); err != nil {
+		panic(err) // this really shouldn't happen
+	}
 
 	// Add a remote for the fork
 	logrus.Infof("adding personal fork remote")
-	forkURL := fmt.Sprintf("git@github.com:%s/%s.git", *user.Login, prInfo.Repository)
 	err = exec.Command("git", "remote", "add", "fork", forkURL).Run()
 	if err != nil {
 		return "", err
