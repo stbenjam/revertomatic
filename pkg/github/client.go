@@ -198,7 +198,7 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repo
 
 		repoOpts = &v1.RepositoryOptions{
 			LocalPath:      tempDir,
-			UpstreamRemote: "upstream",
+			UpstreamRemote: "origin",
 			ForkRemote:     "fork",
 		}
 	}
@@ -208,21 +208,21 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repo
 	}
 
 	// Branch
-	err = exec.Command("git", "fetch", repoOpts.UpstreamRemote).Run()
+	err = execWithOutput("git", "fetch", repoOpts.UpstreamRemote)
 	if err != nil {
 		return err
 	}
 	revertBranch := fmt.Sprintf("revert-%d-%d", prInfo.Number, time.Now().UnixMilli())
 	logrus.Infof("creating revert branch %s", revertBranch)
-	err = exec.Command("git", "checkout", "-b", revertBranch, fmt.Sprintf("%s/%s", repoOpts.UpstreamRemote, prInfo.BaseBranch)).Run()
+	err = execWithOutput("git", "checkout", "-b", revertBranch, fmt.Sprintf("%s/%s", repoOpts.UpstreamRemote, prInfo.BaseBranch))
 	if err != nil {
 		return err
 	}
-	err = exec.Command("git", "revert", "-m1", "--no-edit", prInfo.MergedSHA).Run()
+	err = execWithOutput("git", "revert", "-m1", "--no-edit", prInfo.MergedSHA)
 	if err != nil {
 		return err
 	}
-	err = exec.Command("git", "push", repoOpts.ForkRemote, revertBranch).Run()
+	err = execWithOutput("git", "push", repoOpts.ForkRemote, revertBranch)
 	if err != nil {
 		return err
 	}
@@ -284,7 +284,7 @@ func (c *Client) cloneRepository(prInfo *v1.PullRequest, forkURL string) (string
 	logrus.Infof("cloning upstream repository...")
 	upstreamURL := fmt.Sprintf("https://github.com/%s/%s.git", prInfo.Owner, prInfo.Repository)
 	// shallow clone for slightly faster reverts
-	err = exec.Command("git", "clone", "-b", prInfo.BaseBranch, upstreamURL, tempDir).Run()
+	err = execWithOutput("git", "clone", "-b", prInfo.BaseBranch, upstreamURL, tempDir)
 	if err != nil {
 		return "", err
 	}
@@ -296,10 +296,17 @@ func (c *Client) cloneRepository(prInfo *v1.PullRequest, forkURL string) (string
 
 	// Add a remote for the fork
 	logrus.Infof("adding personal fork remote")
-	err = exec.Command("git", "remote", "add", "fork", forkURL).Run()
+	err = execWithOutput("git", "remote", "add", "fork", forkURL)
 	if err != nil {
 		return "", err
 	}
 
 	return tempDir, nil
+}
+
+func execWithOutput(name string, arg ...string) error {
+	cmd := exec.Command(name, arg...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
