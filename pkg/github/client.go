@@ -37,6 +37,10 @@ To unrevert this, revert this PR, and layer an additional separate commit on top
 ` + "```" + `
 
 CC: @{{.OriginalAuthor}}
+
+<div align="right">
+PR created by <a href="https://github.com/stbenjam/revertomatic">Revertomatic<sup>:tm:</sup></a>
+</div>
 `
 
 // unoveridableJobs are the jobs we typically don't want to override: typically fast running and the bare minimum to
