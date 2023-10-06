@@ -18,6 +18,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	v1 "github.com/openshift-eng/revertomatic/pkg/api/v1"
 )
@@ -162,7 +163,7 @@ func (c *Client) GetOverridableStatuses(prInfo *v1.PullRequest) ([]string, error
 	return uniqueStatuses.UnsortedList(), nil
 }
 
-func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repoOpts *v1.RepositoryOptions) error {
+func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, repoOpts *v1.RepositoryOptions) error {
 	// Fetch user details
 	user, _, err := c.client.Users.Get(c.ctx, "")
 	if err != nil {
@@ -180,8 +181,29 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repo
 			// If not, create a fork
 			repo, _, err = c.client.Repositories.CreateFork(c.ctx, prInfo.Owner, prInfo.Repository, nil)
 			if err != nil {
-				return err
+				// Sometimes the fork is queued and not ready immediately, so wait for it to be ready
+				backoff := wait.Backoff{
+					Duration: 1 * time.Second,
+					Factor:   1.5,
+					Jitter:   0.2,
+					Steps:    10,
+				}
+				operation := func(ctx context.Context) (bool, error) {
+					logrus.WithError(err).Infof("Fork not ready, waiting to see it becomes available...")
+					repo, _, err = c.client.Repositories.Get(c.ctx, *user.Login, prInfo.Repository)
+					if err != nil {
+						return false, nil
+					}
+
+					return true, nil
+				}
+
+				if err := wait.ExponentialBackoffWithContext(c.ctx, backoff, operation); err != nil {
+					logrus.WithError(err).Warningf("fork failed to become available")
+					return err
+				}
 			}
+
 		} else {
 			logrus.Infof("fork of %q already exists for user %q", prInfo.Repository, *user.Login)
 		}
@@ -243,7 +265,7 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, context, jobs string, repo
 	}{
 		OriginalAuthor: prInfo.Author,
 		JiraIssue:      jira,
-		Context:        context,
+		Context:        contextMsg,
 		Jobs:           jobs,
 		OriginalPR:     prInfo.Number,
 	}
