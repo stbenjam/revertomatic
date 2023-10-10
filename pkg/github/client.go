@@ -128,6 +128,12 @@ func (c *Client) ExtractPRInfo(githubURL string) (*v1.PullRequest, error) {
 }
 
 func (c *Client) GetOverridableStatuses(prInfo *v1.PullRequest) ([]string, error) {
+	logrus.Infof("going to generate CI overrides, waiting about 30s for ci jobs to start...")
+	for i := 0; i < 30; i++ {
+		fmt.Print(".")
+		time.Sleep(time.Second)
+	}
+
 	// Get the PR
 	pr, _, err := c.client.PullRequests.Get(c.ctx, prInfo.Owner, prInfo.Repository, prInfo.Number)
 	if err != nil {
