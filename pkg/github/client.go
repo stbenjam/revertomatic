@@ -296,7 +296,7 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, r
 
 	logrus.Infof("pr created %s", pr.GetHTMLURL())
 
-	return c.ExtractPRInfo(*pr.URL)
+	return c.ExtractPRInfo(pr.GetHTMLURL())
 }
 
 func (c *Client) cloneRepository(prInfo *v1.PullRequest, forkURL string) (string, error) {

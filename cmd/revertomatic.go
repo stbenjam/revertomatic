@@ -89,6 +89,7 @@ var cmd = &cobra.Command{
 			fmt.Print(".")
 			time.Sleep(time.Second)
 		}
+		fmt.Println()
 
 		statuses, err := client.GetOverridableStatuses(revertPR)
 		if err != nil {
