@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -13,7 +14,6 @@ import (
 
 var opts struct {
 	prURI          string
-	override       bool
 	jira           string
 	context        string
 	verify         string
@@ -30,6 +30,8 @@ func NewCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.jira, "jira", "j", "", "Jira card tracking the revert")
 	cmd.Flags().StringVarP(&opts.context, "context", "c", "", "Supply context explaining the revert")
 	cmd.Flags().StringVarP(&opts.verify, "verify", "v", "", "Supply details about how to verify a fix (i.e. jobs to run)")
+
+	cmd.AddCommand(NewOverrideCommand())
 	return cmd
 }
 
@@ -76,12 +78,19 @@ var cmd = &cobra.Command{
 			}
 		}
 
-		if err := client.Revert(pr, opts.jira, opts.context, opts.verify, repoOpts); err != nil {
+		revertPR, err := client.Revert(pr, opts.jira, opts.context, opts.verify, repoOpts)
+		if err != nil {
 			return err
 		}
 
 		fmt.Println("******** After verifying the PR is correct, you can use the comment below to override CI:")
-		statuses, err := client.GetOverridableStatuses(pr)
+		logrus.Infof("going to generate CI overrides, waiting about 30s for ci jobs to start...")
+		for i := 0; i < 30; i++ {
+			fmt.Print(".")
+			time.Sleep(time.Second)
+		}
+
+		statuses, err := client.GetOverridableStatuses(revertPR)
 		if err != nil {
 			return err
 		}
