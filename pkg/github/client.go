@@ -128,6 +128,12 @@ func (c *Client) ExtractPRInfo(githubURL string) (*v1.PullRequest, error) {
 }
 
 func (c *Client) GetOverridableStatuses(prInfo *v1.PullRequest) ([]string, error) {
+	logrus.Infof("going to generate CI overrides, waiting about 30s for ci jobs to start...")
+	for i := 0; i < 30; i++ {
+		fmt.Print(".")
+		time.Sleep(time.Second)
+	}
+
 	// Get the PR
 	pr, _, err := c.client.PullRequests.Get(c.ctx, prInfo.Owner, prInfo.Repository, prInfo.Number)
 	if err != nil {
@@ -167,11 +173,11 @@ func (c *Client) GetOverridableStatuses(prInfo *v1.PullRequest) ([]string, error
 	return uniqueStatuses.UnsortedList(), nil
 }
 
-func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, repoOpts *v1.RepositoryOptions) (*v1.PullRequest, error) {
+func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, repoOpts *v1.RepositoryOptions) error {
 	// Fetch user details
 	user, _, err := c.client.Users.Get(c.ctx, "")
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// If we don't have a local copy we'll clone it and make sure the user has a fork
@@ -204,7 +210,7 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, r
 
 				if err := wait.ExponentialBackoffWithContext(c.ctx, backoff, operation); err != nil {
 					logrus.WithError(err).Warningf("fork failed to become available")
-					return nil, err
+					return err
 				}
 			}
 
@@ -216,7 +222,7 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, r
 		forkURL := fmt.Sprintf("git@github.com:%s/%s.git", *user.Login, *repo.Name)
 		tempDir, err := c.cloneRepository(prInfo, forkURL)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		defer func() {
 			_ = os.RemoveAll(tempDir) // clean up after using
@@ -230,33 +236,33 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, r
 	}
 
 	if err := os.Chdir(repoOpts.LocalPath); err != nil {
-		return nil, err
+		return err
 	}
 
 	// Branch
 	err = execWithOutput("git", "fetch", repoOpts.UpstreamRemote)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	revertBranch := fmt.Sprintf("revert-%d-%d", prInfo.Number, time.Now().UnixMilli())
 	logrus.Infof("creating revert branch %s", revertBranch)
 	err = execWithOutput("git", "checkout", "-b", revertBranch, fmt.Sprintf("%s/%s", repoOpts.UpstreamRemote, prInfo.BaseBranch))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	err = execWithOutput("git", "revert", "-m1", "--no-edit", prInfo.MergedSHA)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	err = execWithOutput("git", "push", repoOpts.ForkRemote, revertBranch)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Revert template
 	tmpl, err := template.New("revertTemplate").Parse(revertTemplate)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Revert template
@@ -276,7 +282,7 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, r
 
 	var renderedMsg bytes.Buffer
 	if err := tmpl.Execute(&renderedMsg, data); err != nil {
-		return nil, err
+		return err
 	}
 
 	// Pull request details
@@ -291,12 +297,12 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, r
 	pr, _, err := c.client.PullRequests.Create(c.ctx, prInfo.Owner, prInfo.Repository, newPR)
 	if err != nil {
 		logrus.WithError(err).Warn("PullRequests.Create returned error")
-		return nil, err
+		return err
 	}
 
 	logrus.Infof("pr created %s", pr.GetHTMLURL())
 
-	return c.ExtractPRInfo(*pr.URL)
+	return nil
 }
 
 func (c *Client) cloneRepository(prInfo *v1.PullRequest, forkURL string) (string, error) {
