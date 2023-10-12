@@ -248,7 +248,7 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, r
 	if err != nil {
 		return nil, err
 	}
-	err = execWithOutput("git", "push", repoOpts.ForkRemote, revertBranch)
+	err = execWithOutput("git", "push", repoOpts.ForkRemote, fmt.Sprintf("%s:%s", revertBranch, revertBranch))
 	if err != nil {
 		return nil, err
 	}
