@@ -281,7 +281,7 @@ func (c *Client) Revert(prInfo *v1.PullRequest, jira, contextMsg, jobs string, r
 
 	// Pull request details
 	newPR := &github.NewPullRequest{
-		Title:               github.String(fmt.Sprintf("Revert #%d %q", prInfo.Number, prInfo.Title)),
+		Title:               github.String(fmt.Sprintf("%s: Revert #%d %q", jira, prInfo.Number, prInfo.Title)),
 		Head:                github.String(fmt.Sprintf("%s:%s", *user.Login, revertBranch)),
 		Base:                github.String(prInfo.BaseBranch), // branch you want to merge into
 		Body:                github.String(renderedMsg.String()),
