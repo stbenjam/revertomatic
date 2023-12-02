@@ -45,7 +45,7 @@ PR created by <a href="https://github.com/stbenjam/revertomatic">Revertomatic<su
 
 // unoveridableJobs are the jobs we typically don't want to override: typically fast running and the bare minimum to
 // make sure things build.
-var unoveridableJobs = regexp.MustCompile(`.*(unit|lint|images|verify|tide|verify-deps)$`)
+var unoveridableJobs = regexp.MustCompile(`.*(unit|lint|images|verify|tide|verify-deps|fmt|vendor|vet)$`)
 
 type Client struct {
 	ctx    context.Context
